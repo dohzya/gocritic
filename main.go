@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/russross/blackfriday"
@@ -19,13 +20,13 @@ const (
 /*--------------------*/
 /*--------------------*/
 /*--------------------*/
-func Critic(out *bytes.Buffer, data []byte) {
+func Critic(w io.Writer, data []byte) {
 	offset := 0
 	for offset < len(data) {
 
 		// copy non-special chars
 		for offset < len(data) && data[offset] != '{' {
-			out.WriteByte(data[offset])
+			io.WriteString(w, string(data[offset]))
 			offset++
 		}
 
@@ -69,14 +70,14 @@ func Critic(out *bytes.Buffer, data []byte) {
 			tbegin = `<span class="critic comment">`
 			tclose = "</span>"
 		default:
-			out.WriteByte(data[offset])
+			io.WriteString(w, string(data[offset]))
 			offset++
 			continue
 		}
 		ostart := offset + 3 // offset of the actual content start
 		oend = strings.Index(string(data[ostart:]), sclose)
 		if oend < 1 {
-			out.WriteByte(data[offset])
+			io.WriteString(w, string(data[offset]))
 			offset++
 			continue
 		}
@@ -87,34 +88,34 @@ func Critic(out *bytes.Buffer, data []byte) {
 			oinsend := oend
 			odelend := strings.Index(string(data[odelstart:]), "~>")
 			if odelend < 1 {
-				out.WriteByte(data[offset])
+				io.WriteString(w, string(data[offset]))
 				offset++
 				continue
 			}
 			odelend += odelstart
 			oinsstart := odelend + 2 // len("~>")
-			out.WriteString("<del>")
-			out.Write(data[odelstart:odelend])
-			out.WriteString("</del><ins>")
-			out.Write(data[oinsstart:oinsend])
-			out.WriteString("</ins>")
+			io.WriteString(w, "<del>")
+			io.WriteString(w, string(data[odelstart:odelend]))
+			io.WriteString(w, "</del><ins>")
+			io.WriteString(w, string(data[oinsstart:oinsend]))
+			io.WriteString(w, "</ins>")
 		} else {
-			out.WriteString(tbegin)
+			io.WriteString(w, tbegin)
 			if kind == critic_ins {
 				if data[ostart] == '\n' {
 					if (oend - ostart) == 1 { // {++\n++}
-						out.WriteString("&nbsp;")
+						io.WriteString(w, "&nbsp;")
 					} else {
-						out.Write(data[ostart+1 : oend])
+						io.WriteString(w, string(data[ostart+1:oend]))
 					}
-					out.WriteString(tclose)
+					io.WriteString(w, tclose)
 				} else {
-					out.Write(data[ostart:oend])
-					out.WriteString(tclose)
+					io.WriteString(w, string(data[ostart:oend]))
+					io.WriteString(w, tclose)
 				}
 			} else {
-				out.Write(data[ostart:oend])
-				out.WriteString(tclose)
+				io.WriteString(w, string(data[ostart:oend]))
+				io.WriteString(w, tclose)
 			}
 		}
 
