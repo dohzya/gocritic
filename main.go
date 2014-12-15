@@ -239,10 +239,32 @@ main: // main iteration (1 loop = 1 read)
 
 func main() {
 	md := flag.Bool("md", false, "Use markdown parser")
+	i := flag.String("i", "-", "Input file (default: STDIN)")
+	o := flag.String("o", "-", "Output file (default: STDOUT)")
 	flag.Parse()
 
-	var input io.Reader = os.Stdin
-	var output io.Writer = os.Stdout
+	var input io.Reader
+	if *i == "" || *i == "-" {
+		input = os.Stdin
+	} else {
+		file, err := os.Open(*i)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[gocritic] Can't open %s: %s\n", *i, err.Error())
+			return
+		}
+		input = file
+	}
+	var output io.Writer
+	if *o == "" || *o == "-" {
+		output = os.Stdout
+	} else {
+		file, err := os.Create(*o)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[gocritic] Create create %s: %s\n", *o, err.Error())
+			return
+		}
+		output = file
+	}
 
 	if *md {
 		bMd := bytes.NewBuffer(make([]byte, 0))
