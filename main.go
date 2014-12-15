@@ -18,7 +18,8 @@ const (
 	mNormal mode = iota
 	mIns
 	mDel
-	mSub
+	mSub1
+	mSub2
 	mComment
 	mHighligh
 )
@@ -27,22 +28,23 @@ var ops = map[mode]byte{
 	mNormal:   '{',
 	mIns:      '+',
 	mDel:      '-',
-	mSub:      '~',
+	mSub1:     '~',
+	mSub2:     '~',
 	mComment:  '<',
 	mHighligh: '=',
 }
 
 type context struct {
-	mode         mode
-	insTagged    bool
-	insMultiline bool
+	mode      mode
+	insTagged bool
+	multiline bool
 }
 
 func isOp(ctx context, c byte) bool {
 	if c == ops[ctx.mode] {
 		return true
 	}
-	if ctx.mode == mIns && !ctx.insTagged {
+	if (ctx.mode == mIns || ctx.mode == mSub2) && !ctx.insTagged {
 		return c != '\n' && c != '\r'
 	}
 	return false
@@ -50,10 +52,10 @@ func isOp(ctx context, c byte) bool {
 
 // Critic converts critic markup into HTML
 func Critic(w io.Writer, r io.Reader) (int, error) {
-	rbuf := make([]byte, 32) // actual buffer
-	buf := rbuf[2:]          // buf used for reading
-	read := 0                // total bytes read
-	bi := 2                  // index of 1st byte of rbuf which is a data
+	rbuf := make([]byte, 3) // actual buffer
+	buf := rbuf[2:]         // buf used for reading
+	read := 0               // total bytes read
+	bi := 2                 // index of 1st byte of rbuf which is a data
 	ctx := context{mNormal, false, false}
 
 	// bi allows to keep some bytes from an iteration to an other
@@ -86,8 +88,8 @@ main: // main iteration (1 loop = 1 read)
 			if _, err := w.Write(data[i:offset]); err != nil {
 				return read, err
 			}
-			if ctx.mode == mIns && offset > i {
-				ctx.insMultiline = true
+			if (ctx.mode == mIns || ctx.mode == mSub2) && offset > i {
+				ctx.multiline = true
 			}
 			if offset >= len(data) {
 				bi = 2
@@ -114,7 +116,7 @@ main: // main iteration (1 loop = 1 read)
 			case "{++":
 				ctx.mode = mIns
 				ctx.insTagged = false
-				ctx.insMultiline = false
+				ctx.multiline = false
 				// the <ins> tag will be writen after having read all
 				// `\n` following the `{++` tag.
 				offset += 3
@@ -122,7 +124,7 @@ main: // main iteration (1 loop = 1 read)
 			case "++}":
 				var s string
 				if !ctx.insTagged {
-					if ctx.insMultiline {
+					if ctx.multiline {
 						s = "<ins class=\"break\">&nbsp;</ins>\n"
 					} else {
 						s = "<ins>&nbsp;</ins>"
@@ -132,7 +134,7 @@ main: // main iteration (1 loop = 1 read)
 				}
 				ctx.mode = mNormal
 				ctx.insTagged = false
-				ctx.insMultiline = false
+				ctx.multiline = false
 				if _, err := w.Write([]byte(s)); err != nil {
 					return read, err
 				}
@@ -153,15 +155,25 @@ main: // main iteration (1 loop = 1 read)
 				offset += 3
 				bi = 2
 			case "{~~":
-				ctx.mode = mSub
+				ctx.mode = mSub1
 				if _, err := w.Write([]byte("<del>")); err != nil {
 					return read, err
 				}
 				offset += 3
 				bi = 2
 			case "~~}":
+				var s string
+				if !ctx.insTagged {
+					if ctx.multiline {
+						s = "<ins class=\"break\">&nbsp;</ins>\n"
+					} else {
+						s = "<ins>&nbsp;</ins>"
+					}
+				} else {
+					s = "</ins>"
+				}
 				ctx.mode = mNormal
-				if _, err := w.Write([]byte("</ins>")); err != nil {
+				if _, err := w.Write([]byte(s)); err != nil {
 					return read, err
 				}
 				offset += 3
@@ -195,16 +207,19 @@ main: // main iteration (1 loop = 1 read)
 				offset += 3
 				bi = 2
 			default:
-				if ctx.mode == mIns && !ctx.insTagged {
+				if (ctx.mode == mIns || ctx.mode == mSub2) && !ctx.insTagged {
 					if _, err := w.Write([]byte("<ins>")); err != nil {
 						return read, err
 					}
 					ctx.insTagged = true
 				}
-				if ctx.mode == mSub && string(data[offset:offset+2]) == "~>" {
-					if _, err := w.Write([]byte(`</del><ins>`)); err != nil {
+				if ctx.mode == mSub1 && string(data[offset:offset+2]) == "~>" {
+					if _, err := w.Write([]byte(`</del>`)); err != nil {
 						return read, err
 					}
+					ctx.mode = mSub2
+					ctx.insTagged = false
+					ctx.multiline = false
 					offset += 2
 					bi = 2
 					continue sub
@@ -278,7 +293,8 @@ Vestibulum at orci magna. Phasellus augue justo, sodales eu pulvinar ac,
 vulputate eget nulla. Mauris massa sem, tempor sed cursus et, semper tincidunt
 lacus. Praesent sagittis, quam id egestas consequat, nisl orci vehicula
 libero, quis ultricies nulla magna interdum sem. Maecenas eget orci vitae
-eros accumsan mollis. Cras mi mi, rutrum id aliquam in, <del>aliquet vitae<del><ins class="break">&nbsp;</ins>
+eros accumsan mollis. Cras mi mi, rutrum id aliquam in, <del>aliquet vitae</del>
+<ins class="break">&nbsp;</ins>
 tellus. Sed neque justo, cursus in commodo eget, facilisis eget nunc.
 Cras tincidunt auctor varius.</p>
 `,
