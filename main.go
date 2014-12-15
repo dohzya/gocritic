@@ -8,25 +8,42 @@ import (
 	"github.com/russross/blackfriday"
 )
 
+// --------------------
+// --------------------
+// --------------------
+
+type mode int
+
 const (
-	cIns = iota
-	cDel
-	cSub
-	cComment
-	cHighligh
+	mNormal mode = iota
+	mIns
+	mDel
+	mSub
+	mComment
+	mHighligh
 )
 
-// --------------------
-// --------------------
-// --------------------
+var ops = map[mode]byte{
+	mNormal:   '{',
+	mIns:      '+',
+	mDel:      '-',
+	mSub:      '~',
+	mComment:  '<',
+	mHighligh: '=',
+}
 
-var ops = []byte{'{', '+', '-', '=', '<', '~'}
+type context struct {
+	mode         mode
+	insTagged    bool
+	insMultiline bool
+}
 
-func isOp(c byte) bool {
-	for _, op := range ops {
-		if c == op {
-			return true
-		}
+func isOp(ctx context, c byte) bool {
+	if c == ops[ctx.mode] {
+		return true
+	}
+	if ctx.mode == mIns && !ctx.insTagged {
+		return c != '\n' && c != '\r'
 	}
 	return false
 }
@@ -37,6 +54,8 @@ func Critic(w io.Writer, r io.Reader) (int, error) {
 	buf := rbuf[2:]          // buf used for reading
 	read := 0                // total bytes read
 	bi := 2                  // index of 1st byte of rbuf which is a data
+	ctx := context{mNormal, false, false}
+
 	// bi allows to keep some bytes from an iteration to an other
 main: // main iteration (1 loop = 1 read)
 	for {
@@ -61,12 +80,14 @@ main: // main iteration (1 loop = 1 read)
 		for offset < len(data) {
 			i := offset
 			// copy non-special chars
-			for offset < len(data) && !isOp(data[offset]) {
+			for offset < len(data) && !isOp(ctx, data[offset]) {
 				offset++
 			}
 			if _, err := w.Write(data[i:offset]); err != nil {
-				bi = 2
 				return read, err
+			}
+			if ctx.mode == mIns && offset > i {
+				ctx.insMultiline = true
 			}
 			if offset >= len(data) {
 				bi = 2
@@ -91,57 +112,86 @@ main: // main iteration (1 loop = 1 read)
 			// there are more than 3 chars and it could be an op
 			switch string(data[offset : offset+3]) {
 			case "{++":
-				if _, err := w.Write([]byte("<ins>")); err != nil {
-					return read, err
-				}
+				ctx.mode = mIns
+				ctx.insTagged = false
+				ctx.insMultiline = false
+				// the <ins> tag will be writen after having read all
+				// `\n` following the `{++` tag.
 				offset += 3
 			case "++}":
-				if _, err := w.Write([]byte("</ins>")); err != nil {
+				var s string
+				if !ctx.insTagged {
+					if ctx.insMultiline {
+						s = "<ins class=\"break\">&nbsp;</ins>\n"
+					} else {
+						s = "<ins>&nbsp;</ins>"
+					}
+				} else {
+					s = "</ins>"
+				}
+				ctx.mode = mNormal
+				ctx.insTagged = false
+				ctx.insMultiline = false
+				if _, err := w.Write([]byte(s)); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "{--":
+				ctx.mode = mDel
 				if _, err := w.Write([]byte("<del>")); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "--}":
+				ctx.mode = mNormal
 				if _, err := w.Write([]byte("</del>")); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "{~~":
+				ctx.mode = mSub
 				if _, err := w.Write([]byte("<del>")); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "~~}":
+				ctx.mode = mNormal
 				if _, err := w.Write([]byte("</ins>")); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "{==":
+				ctx.mode = mHighligh
 				if _, err := w.Write([]byte("<mark>")); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "==}":
+				ctx.mode = mNormal
 				if _, err := w.Write([]byte("</mark>")); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "{>>":
+				ctx.mode = mComment
 				if _, err := w.Write([]byte(`<span class="critic comment">`)); err != nil {
 					return read, err
 				}
 				offset += 3
 			case "<<}":
+				ctx.mode = mNormal
 				if _, err := w.Write([]byte(`</span>`)); err != nil {
 					return read, err
 				}
 				offset += 3
 			default:
-				if string(data[offset:offset+2]) == "~>" {
+				if ctx.mode == mIns && !ctx.insTagged {
+					if _, err := w.Write([]byte("<ins>")); err != nil {
+						return read, err
+					}
+					ctx.insTagged = true
+				}
+				if ctx.mode == mSub && string(data[offset:offset+2]) == "~>" {
 					if _, err := w.Write([]byte(`</del><ins>`)); err != nil {
 						return read, err
 					}
