@@ -4,122 +4,157 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/russross/blackfriday"
 )
 
 const (
-	critic_ins = iota
-	critic_del
-	critic_sub
-	critic_comment
-	critic_highligh
+	cIns = iota
+	cDel
+	cSub
+	cComment
+	cHighligh
 )
 
-/*--------------------*/
-/*--------------------*/
-/*--------------------*/
-func Critic(w io.Writer, data []byte) {
-	offset := 0
-	for offset < len(data) {
+// --------------------
+// --------------------
+// --------------------
 
-		// copy non-special chars
-		for offset < len(data) && data[offset] != '{' {
-			io.WriteString(w, string(data[offset]))
-			offset++
-		}
+var ops = []byte{'{', '+', '-', '=', '<', '~'}
 
-		// prevents index errors
-		if offset > len(data)-6 {
-			continue
+func isOp(c byte) bool {
+	for _, op := range ops {
+		if c == op {
+			return true
 		}
+	}
+	return false
+}
 
-		sopen := data[offset : offset+3] // all delim are 3 chars length
-		var oend int                     // offset of the actual content end
-		var sclose string
-		var tbegin, tclose string
-		var kind int
-		switch string(sopen) {
-		case "{++":
-			kind = critic_ins
-			sclose = "++}"
-			if data[offset+3] == '\n' {
-				tbegin = "\n<ins class=\"break\">"
-				tclose = "</ins>\n"
-			} else {
-				tbegin = "<ins>"
-				tclose = "</ins>"
-			}
-		case "{--":
-			kind = critic_del
-			sclose = "--}"
-			tbegin = "<del>"
-			tclose = "</del>"
-		case "{~~":
-			kind = critic_sub
-			sclose = "~~}"
-		case "{==":
-			kind = critic_comment
-			sclose = "==}"
-			tbegin = "<mark>"
-			tclose = "</mark>"
-		case "{>>":
-			kind = critic_highligh
-			sclose = "<<}"
-			tbegin = `<span class="critic comment">`
-			tclose = "</span>"
-		default:
-			io.WriteString(w, string(data[offset]))
-			offset++
-			continue
-		}
-		ostart := offset + 3 // offset of the actual content start
-		oend = strings.Index(string(data[ostart:]), sclose)
-		if oend < 1 {
-			io.WriteString(w, string(data[offset]))
-			offset++
-			continue
-		}
-		oend += ostart
-
-		if kind == critic_sub {
-			odelstart := ostart
-			oinsend := oend
-			odelend := strings.Index(string(data[odelstart:]), "~>")
-			if odelend < 1 {
-				io.WriteString(w, string(data[offset]))
-				offset++
-				continue
-			}
-			odelend += odelstart
-			oinsstart := odelend + 2 // len("~>")
-			io.WriteString(w, "<del>")
-			io.WriteString(w, string(data[odelstart:odelend]))
-			io.WriteString(w, "</del><ins>")
-			io.WriteString(w, string(data[oinsstart:oinsend]))
-			io.WriteString(w, "</ins>")
-		} else {
-			io.WriteString(w, tbegin)
-			if kind == critic_ins {
-				if data[ostart] == '\n' {
-					if (oend - ostart) == 1 { // {++\n++}
-						io.WriteString(w, "&nbsp;")
-					} else {
-						io.WriteString(w, string(data[ostart+1:oend]))
-					}
-					io.WriteString(w, tclose)
-				} else {
-					io.WriteString(w, string(data[ostart:oend]))
-					io.WriteString(w, tclose)
+// Critic converts critic markup into HTML
+func Critic(w io.Writer, r io.Reader) (int, error) {
+	rbuf := make([]byte, 16) // actual buffer
+	buf := rbuf[2:]          // buf used for reading
+	read := 0                // total bytes read
+	bi := 2                  // index of 1st byte of rbuf which is a data
+	// bi allows to keep some bytes from an iteration to an other
+main: // main iteration (1 loop = 1 read)
+	for {
+		ri, errr := r.Read(buf)
+		read += ri
+		if ri == 0 && errr != nil {
+			if bi < 2 {
+				// there are some bytes saved from the last iteration
+				if _, err := w.Write(rbuf[bi:2]); err != nil {
+					return read, err
 				}
-			} else {
-				io.WriteString(w, string(data[ostart:oend]))
-				io.WriteString(w, tclose)
+			}
+			if errr != io.EOF {
+				return read, errr
+			}
+			return read, nil
+		}
+		data := rbuf[bi : 2+ri]
+		offset := 0
+
+	sub: // iteration on the data read
+		for offset < len(data) {
+			i := offset
+			// copy non-special chars
+			for offset < len(data) && !isOp(data[offset]) {
+				offset++
+			}
+			if _, err := w.Write(data[i:offset]); err != nil {
+				bi = 2
+				return read, err
+			}
+			if offset >= len(data) {
+				bi = 2
+				continue main
+			}
+			// if there are not enough chars to make op, save them for later
+			// (actually there is an op of 2 chars only (`~>`) but it can't
+			// be used at the EOF because it needs to be followed by `~~}`,
+			// so we can store it for the next iteration and risk to not
+			// handle it as an op if reaching EOF on the next read)
+			if offset > len(data)-2 {
+				rbuf[1] = data[offset]
+				bi = 1
+				continue main
+			}
+			if offset > len(data)-3 {
+				rbuf[0] = data[offset]
+				rbuf[1] = data[offset+1]
+				bi = 0
+				continue main
+			}
+			// there are more than 3 chars and it could be an op
+			switch string(data[offset : offset+3]) {
+			case "{++":
+				if _, err := w.Write([]byte("<ins>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "++}":
+				if _, err := w.Write([]byte("</ins>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "{--":
+				if _, err := w.Write([]byte("<del>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "--}":
+				if _, err := w.Write([]byte("</del>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "{~~":
+				if _, err := w.Write([]byte("<del>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "~~}":
+				if _, err := w.Write([]byte("</ins>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "{==":
+				if _, err := w.Write([]byte("<mark>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "==}":
+				if _, err := w.Write([]byte("</mark>")); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "{>>":
+				if _, err := w.Write([]byte(`<span class="critic comment">`)); err != nil {
+					return read, err
+				}
+				offset += 3
+			case "<<}":
+				if _, err := w.Write([]byte(`</span>`)); err != nil {
+					return read, err
+				}
+				offset += 3
+			default:
+				if string(data[offset:offset+2]) == "~>" {
+					if _, err := w.Write([]byte(`</del><ins>`)); err != nil {
+						return read, err
+					}
+					offset += 2
+					continue sub
+				}
+				if _, err := w.Write(data[offset : offset+1]); err != nil {
+					return read, err
+				}
+				offset++
+				continue sub
 			}
 		}
-
-		offset = oend + len(sclose)
 	}
 }
 
@@ -128,11 +163,15 @@ func ex1(ext int) {
 	exp := `<p>lacus<ins> est</ins> Pra{e}sent.</p>
 `
 	md := bytes.NewBuffer(make([]byte, 0))
-	Critic(md, []byte(critic))
+	_, err := Critic(md, bytes.NewBufferString(critic))
+	if err != nil {
+		fmt.Printf("failed: %s\n", err.Error())
+		return
+	}
 	readb := blackfriday.MarkdownHtml(md.Bytes(), ext)
 	real := string(readb)
-	// fmt.Printf("critic  : ---%s---\n", critic)
-	// fmt.Printf("md      : ---%s---\n", md)
+	fmt.Printf("critic  : ---%s---\n", critic)
+	fmt.Printf("md      : ---%s---\n", md)
 	// fmt.Printf("real    : ---%v---\n", real[:len(real)-1])
 	// fmt.Printf("expected: ---%v---\n", exp[:len(exp)-1])
 	fmt.Printf("\n%v\n", real == exp)
@@ -151,11 +190,15 @@ on the planet. <mark>Truth is stranger than fiction</mark><span class="critic co
 but it is because Fiction is obliged to stick to possibilities; Truth isn't.</p>
 `
 	md := bytes.NewBuffer(make([]byte, 0))
-	Critic(md, []byte(critic))
+	_, err := Critic(md, bytes.NewBufferString(critic))
+	if err != nil {
+		fmt.Printf("failed: %s\n", err.Error())
+		return
+	}
 	readb := blackfriday.MarkdownHtml(md.Bytes(), ext)
 	real := string(readb)
-	// fmt.Printf("critic  : ---%s---\n", critic)
-	// fmt.Printf("md      : ---%s---\n", md)
+	fmt.Printf("critic  : ---%s---\n", critic)
+	fmt.Printf("md      : ---%s---\n", md)
 	// fmt.Printf("real    : ---%v---\n", real[:len(real)-1])
 	// fmt.Printf("expected: ---%v---\n", exp[:len(exp)-1])
 	fmt.Printf("\n%v\n", real == exp)
@@ -169,11 +212,15 @@ func ex3(ext int) {
 Praesent sagittis, quam id egestas consequat, nisl orci vehicula libero, quis ultricies nulla magna interdum sem. Maecenas eget orci vitae eros accumsan mollis. Cras mi mi, rutrum id aliquam in, aliquet vitae tellus. Sed neque justo, cursus in commodo eget, facilisis eget nunc. Cras tincidunt auctor varius.</p>
 `
 	md := bytes.NewBuffer(make([]byte, 0))
-	Critic(md, []byte(critic))
+	_, err := Critic(md, bytes.NewBufferString(critic))
+	if err != nil {
+		fmt.Printf("failed: %s\n", err.Error())
+		return
+	}
 	readb := blackfriday.MarkdownHtml(md.Bytes(), ext)
 	real := string(readb)
-	// fmt.Printf("critic  : ---%s---\n", critic)
-	// fmt.Printf("md      : ---%s---\n", md)
+	fmt.Printf("critic  : ---%s---\n", critic)
+	fmt.Printf("md      : ---%s---\n", md)
 	// fmt.Printf("real    : ---%v---\n", real[:len(real)-1])
 	// fmt.Printf("expected: ---%v---\n", exp[:len(exp)-1])
 	fmt.Printf("\n%v\n", real == exp)
