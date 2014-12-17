@@ -232,7 +232,13 @@ main: // main iteration (1 loop = 1 read)
 			default:
 				if (ctx.mode == mIns || ctx.mode == mSub2) && !ctx.insTagged {
 					if !opts.hasFilter() {
-						if _, err := w.Write([]byte("<ins>")); err != nil {
+						var s string
+						if ctx.multiline {
+							s = "<ins class=\"break\">"
+						} else {
+							s = "<ins>"
+						}
+						if _, err := w.Write([]byte(s)); err != nil {
 							return read, err
 						}
 					}
