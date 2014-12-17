@@ -2,10 +2,6 @@ package gocritic
 
 import "io"
 
-// --------------------
-// --------------------
-// --------------------
-
 type mode int
 
 const (
