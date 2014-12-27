@@ -4,41 +4,110 @@ package gocritic
 //
 // For now it allows to filter output.
 type Options struct {
-	filter filter
+	kinds map[kind]bool
+	modes map[mode]bool
 }
 
-func (o *Options) hasFilter() bool {
-	return o.filter != fNone
-}
-func (o *Options) display(m mode) bool {
-	return o.filter == fNone || m == mNormal || m == mHighligh ||
-		o.filter == fBefore && (m == mDel || m == mSub1) ||
-		o.filter == fAfter && (m == mIns || m == mSub2)
+func (o *Options) display(k kind, m mode) bool {
+	return o.kinds[k] && o.modes[m]
 }
 
 func createOptions(fopts ...func(*Options)) *Options {
-	opts := &Options{fNone}
+	opts := &Options{make(map[kind]bool), make(map[mode]bool)}
+	FilterShowAll(opts)
 	for _, f := range fopts {
 		f(opts)
 	}
 	return opts
 }
 
-// FilterNone specifies that no filter is active
-func FilterNone(o *Options) {
-	o.filter = fNone
+// FilterShowAll specifies that no filter is active
+func FilterShowAll(o *Options) {
+	o.kinds[kdText] = true
+	o.kinds[kdTag] = true
+	o.modes[mNormal] = true
+	o.modes[mIns] = true
+	o.modes[mDel] = true
+	o.modes[mSub1] = true
+	o.modes[mSub2] = true
+	o.modes[mComment] = true
+	o.modes[mHighligh] = true
 }
 
-// FilterBefore specifies that only original source is returned
-//
-// Removes contents of {++++} and keeps content of {----}
-func FilterBefore(o *Options) {
-	o.filter = fBefore
+// FilterHideBefore specifies that original sources are not rendered
+func FilterHideBefore(o *Options) {
+	o.modes[mDel] = false
+	o.modes[mSub1] = false
 }
 
-// FilterAfter specifies that only reviewed source is returned
+// FilterShowBefore specifies that original sources are rendered
+func FilterShowBefore(o *Options) {
+	o.modes[mDel] = true
+	o.modes[mSub1] = true
+}
+
+// FilterHideAfter specifies that reviewed sources are not rendered
+func FilterHideAfter(o *Options) {
+	o.modes[mIns] = false
+	o.modes[mSub2] = false
+}
+
+// FilterShowAfter specifies that reviewed sources not rendered
+func FilterShowAfter(o *Options) {
+	o.modes[mIns] = true
+	o.modes[mSub2] = true
+}
+
+// FilterHideComments specifies that comments are not rendered
 //
-// Removes contents of {----} and keeps content of {++++}
-func FilterAfter(o *Options) {
-	o.filter = fAfter
+// This filter also deactivate tags rendering
+func FilterHideComments(o *Options) {
+	o.modes[mComment] = false
+	o.kinds[kdTag] = false
+}
+
+// FilterShowComments specifies that comments not rendered
+//
+// This filter also activate tags rendering
+func FilterShowComments(o *Options) {
+	o.modes[mComment] = true
+	o.kinds[kdTag] = true
+}
+
+// FilterHideTags specifies that tags are not rendered
+func FilterHideTags(o *Options) {
+	o.kinds[kdTag] = false
+}
+
+// FilterShowTags specifies that tags are rendered
+func FilterShowTags(o *Options) {
+	o.kinds[kdTag] = true
+}
+
+//
+// High level
+//
+
+// FilterOnlyBefore specifies that only original sources is rendered
+func FilterOnlyBefore(o *Options) {
+	FilterHideAfter(o)
+}
+
+// FilterOnlyRawBefore specifies that only original sources is rendered
+func FilterOnlyRawBefore(o *Options) {
+	FilterHideAfter(o)
+	FilterHideComments(o)
+	FilterHideTags(o)
+}
+
+// FilterOnlyAfter specifies that only reviewed sources is rendered
+func FilterOnlyAfter(o *Options) {
+	FilterHideBefore(o)
+}
+
+// FilterOnlyRawAfter specifies that only reviewed sources is rendered
+func FilterOnlyRawAfter(o *Options) {
+	FilterHideBefore(o)
+	FilterHideComments(o)
+	FilterHideTags(o)
 }

@@ -14,6 +14,13 @@ const (
 	mHighligh
 )
 
+type kind int
+
+const (
+	kdText kind = iota
+	kdTag
+)
+
 var ops = map[mode]byte{
 	mNormal:   '{',
 	mIns:      '+',
@@ -30,14 +37,6 @@ type context struct {
 	multiline bool
 }
 
-type filter int
-
-const (
-	fNone filter = iota
-	fBefore
-	fAfter
-)
-
 func isOp(ctx context, c byte) bool {
 	if c == ops[ctx.mode] {
 		return true
@@ -46,6 +45,21 @@ func isOp(ctx context, c byte) bool {
 		return c != '\n' && c != '\r'
 	}
 	return false
+}
+
+func write(w io.Writer, b []byte, k kind, m mode, opts *Options) (int, error) {
+	if opts.display(k, m) {
+		return w.Write(b)
+	}
+	return 0, nil
+}
+
+func writeTxt(w io.Writer, b []byte, c context, o *Options) (int, error) {
+	return write(w, b, kdText, c.mode, o)
+}
+
+func writeTg(w io.Writer, b []byte, c context, o *Options) (int, error) {
+	return write(w, b, kdTag, c.mode, o)
 }
 
 // Critic converts critic markup into HTML
@@ -65,12 +79,8 @@ main: // main iteration (1 loop = 1 read)
 		if ri == 0 && errr != nil {
 			if bi < 2 {
 				// there are some bytes saved from the last iteration
-				if opts.display(ctx.mode) {
-					// otpts.display should always returns true but it could avoid
-					// weird behaviors on badly formatted input
-					if _, err := w.Write(rbuf[bi:2]); err != nil {
-						return read, err
-					}
+				if _, err := writeTxt(w, rbuf[bi:2], ctx, opts); err != nil {
+					return read, err
 				}
 			}
 			if errr != io.EOF {
@@ -88,10 +98,8 @@ main: // main iteration (1 loop = 1 read)
 			for offset < len(data) && !isOp(ctx, data[offset]) {
 				offset++
 			}
-			if opts.display(ctx.mode) {
-				if _, err := w.Write(data[i:offset]); err != nil {
-					return read, err
-				}
+			if _, err := writeTxt(w, data[i:offset], ctx, opts); err != nil {
+				return read, err
 			}
 			if (ctx.mode == mIns || ctx.mode == mSub2) && offset > i {
 				ctx.multiline = true
@@ -127,128 +135,106 @@ main: // main iteration (1 loop = 1 read)
 				offset += 3
 				bi = 2
 			case "++}":
-				if !opts.hasFilter() {
-					var s string
-					if !ctx.insTagged {
-						if ctx.multiline {
-							s = "<ins class=\"break\">&nbsp;</ins>\n"
-						} else {
-							s = "<ins>&nbsp;</ins>"
-						}
-					} else {
-						s = "</ins>"
-					}
-					if _, err := w.Write([]byte(s)); err != nil {
-						return read, err
-					}
-				}
 				ctx.mode = mNormal
+				var s string
+				if !ctx.insTagged {
+					if ctx.multiline {
+						s = "<ins class=\"break\">&nbsp;</ins>\n"
+					} else {
+						s = "<ins>&nbsp;</ins>"
+					}
+				} else {
+					s = "</ins>"
+				}
+				if _, err := writeTg(w, []byte(s), ctx, opts); err != nil {
+					return read, err
+				}
 				ctx.insTagged = false
 				ctx.multiline = false
 				offset += 3
 				bi = 2
 			case "{--":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte("<del>")); err != nil {
-						return read, err
-					}
-				}
 				ctx.mode = mDel
+				if _, err := writeTg(w, []byte("<del>"), ctx, opts); err != nil {
+					return read, err
+				}
 				offset += 3
 				bi = 2
 			case "--}":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte("</del>")); err != nil {
-						return read, err
-					}
+				if _, err := writeTg(w, []byte("</del>"), ctx, opts); err != nil {
+					return read, err
 				}
 				ctx.mode = mNormal
 				offset += 3
 				bi = 2
 			case "{~~":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte("<del>")); err != nil {
-						return read, err
-					}
-				}
 				ctx.mode = mSub1
+				if _, err := writeTg(w, []byte("<del>"), ctx, opts); err != nil {
+					return read, err
+				}
 				offset += 3
 				bi = 2
 			case "~~}":
-				if !opts.hasFilter() {
-					var s string
-					if !ctx.insTagged {
-						if ctx.multiline {
-							s = "<ins class=\"break\">&nbsp;</ins>\n"
-						} else {
-							s = "<ins>&nbsp;</ins>"
-						}
+				var s string
+				if !ctx.insTagged {
+					if ctx.multiline {
+						s = "<ins class=\"break\">&nbsp;</ins>\n"
 					} else {
-						s = "</ins>"
+						s = "<ins>&nbsp;</ins>"
 					}
-					if _, err := w.Write([]byte(s)); err != nil {
-						return read, err
-					}
+				} else {
+					s = "</ins>"
+				}
+				if _, err := writeTg(w, []byte(s), ctx, opts); err != nil {
+					return read, err
 				}
 				ctx.mode = mNormal
 				offset += 3
 				bi = 2
 			case "{==":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte("<mark>")); err != nil {
-						return read, err
-					}
-				}
 				ctx.mode = mHighligh
+				if _, err := writeTg(w, []byte("<mark>"), ctx, opts); err != nil {
+					return read, err
+				}
 				offset += 3
 				bi = 2
 			case "==}":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte("</mark>")); err != nil {
-						return read, err
-					}
+				if _, err := writeTg(w, []byte("</mark>"), ctx, opts); err != nil {
+					return read, err
 				}
 				ctx.mode = mNormal
 				offset += 3
 				bi = 2
 			case "{>>":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte(`<span class="critic comment">`)); err != nil {
-						return read, err
-					}
-				}
 				ctx.mode = mComment
+				if _, err := writeTg(w, []byte(`<span class="critic comment">`), ctx, opts); err != nil {
+					return read, err
+				}
 				offset += 3
 				bi = 2
 			case "<<}":
-				if !opts.hasFilter() {
-					if _, err := w.Write([]byte(`</span>`)); err != nil {
-						return read, err
-					}
+				if _, err := writeTg(w, []byte("</span>"), ctx, opts); err != nil {
+					return read, err
 				}
 				ctx.mode = mNormal
 				offset += 3
 				bi = 2
 			default:
 				if (ctx.mode == mIns || ctx.mode == mSub2) && !ctx.insTagged {
-					if !opts.hasFilter() {
-						var s string
-						if ctx.multiline {
-							s = "<ins class=\"break\">"
-						} else {
-							s = "<ins>"
-						}
-						if _, err := w.Write([]byte(s)); err != nil {
-							return read, err
-						}
+					var s string
+					if ctx.multiline {
+						s = "<ins class=\"break\">"
+					} else {
+						s = "<ins>"
+					}
+					if _, err := writeTg(w, []byte(s), ctx, opts); err != nil {
+						return read, err
 					}
 					ctx.insTagged = true
 				}
 				if ctx.mode == mSub1 && string(data[offset:offset+2]) == "~>" {
-					if !opts.hasFilter() {
-						if _, err := w.Write([]byte(`</del>`)); err != nil {
-							return read, err
-						}
+					if _, err := writeTg(w, []byte("</del>"), ctx, opts); err != nil {
+						return read, err
 					}
 					ctx.mode = mSub2
 					ctx.insTagged = false
@@ -257,10 +243,8 @@ main: // main iteration (1 loop = 1 read)
 					bi = 2
 					continue sub
 				}
-				if opts.display(ctx.mode) {
-					if _, err := w.Write(data[offset : offset+1]); err != nil {
-						return read, err
-					}
+				if _, err := writeTxt(w, data[offset:offset+1], ctx, opts); err != nil {
+					return read, err
 				}
 				offset++
 				bi = 2
