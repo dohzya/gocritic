@@ -34,26 +34,26 @@ func FilterShowAll(o *Options) {
 	o.modes[mHighligh] = true
 }
 
-// FilterHideBefore specifies that original sources are not rendered
-func FilterHideBefore(o *Options) {
+// FilterHideOriginal specifies that original sources are not rendered
+func FilterHideOriginal(o *Options) {
 	o.modes[mDel] = false
 	o.modes[mSub1] = false
 }
 
-// FilterShowBefore specifies that original sources are rendered
-func FilterShowBefore(o *Options) {
+// FilterShowOriginal specifies that original sources are rendered
+func FilterShowOriginal(o *Options) {
 	o.modes[mDel] = true
 	o.modes[mSub1] = true
 }
 
-// FilterHideAfter specifies that reviewed sources are not rendered
-func FilterHideAfter(o *Options) {
+// FilterHideEdited specifies that edited sources are not rendered
+func FilterHideEdited(o *Options) {
 	o.modes[mIns] = false
 	o.modes[mSub2] = false
 }
 
-// FilterShowAfter specifies that reviewed sources not rendered
-func FilterShowAfter(o *Options) {
+// FilterShowEdited specifies that edited sources not rendered
+func FilterShowEdited(o *Options) {
 	o.modes[mIns] = true
 	o.modes[mSub2] = true
 }
@@ -88,26 +88,26 @@ func FilterShowTags(o *Options) {
 // High level
 //
 
-// FilterOnlyBefore specifies that only original sources is rendered
-func FilterOnlyBefore(o *Options) {
-	FilterHideAfter(o)
+// FilterOnlyOriginal specifies that only original sources are rendered
+func FilterOnlyOriginal(o *Options) {
+	FilterHideEdited(o)
 }
 
-// FilterOnlyRawBefore specifies that only original sources is rendered
-func FilterOnlyRawBefore(o *Options) {
-	FilterHideAfter(o)
+// FilterOnlyRawOriginal specifies that only original sources are rendered
+func FilterOnlyRawOriginal(o *Options) {
+	FilterHideEdited(o)
 	FilterHideComments(o)
 	FilterHideTags(o)
 }
 
-// FilterOnlyAfter specifies that only reviewed sources is rendered
-func FilterOnlyAfter(o *Options) {
-	FilterHideBefore(o)
+// FilterOnlyEdited specifies that only edited sources are rendered
+func FilterOnlyEdited(o *Options) {
+	FilterHideOriginal(o)
 }
 
-// FilterOnlyRawAfter specifies that only reviewed sources is rendered
-func FilterOnlyRawAfter(o *Options) {
-	FilterHideBefore(o)
+// FilterOnlyRawEdited specifies that only edited sources are rendered
+func FilterOnlyRawEdited(o *Options) {
+	FilterHideOriginal(o)
 	FilterHideComments(o)
 	FilterHideTags(o)
 }
